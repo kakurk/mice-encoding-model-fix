@@ -1,0 +1,317 @@
+---
+title: 'MICE Encoding: Fixed Model'
+author: "Kyle Kurkela"
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+<head>
+  <link rel="stylesheet" type="text/css" href="papaya.css?build=1432" />
+  <script type="text/javascript" src="papaya.js?build=1432"></script>
+  <!-- <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script> -->
+</head>
+
+```{r setup, echo=FALSE,warning=FALSE,message=FALSE}
+library("tidyverse")
+library('reshape2')
+library('ez')
+```
+
+Welcome to the MICE Encoding: Fixed Model notebook!
+
+In this notebook, I will be presenting the results of a "fixed" model (`MixedBlockER_TwoParMods_NRs_removed`) for MICE encoding and contrasting them with the previously misspecified model (`MixedBlockER_TwoParMods`).
+
+# Behavior refresher
+
+Recall, the subsequent memory performance of our sample looks like this:
+
+```{r, fig.align='center'}
+tidy.df <- read.csv("./data/trial-counts.csv")
+
+tidy.df %>%
+  mutate(
+    SubEmoMemScore = factor(SubEmoMemScore, levels = c("4", "NaN", "1", "2", "3"))
+  ) %>%
+  ggplot(aes(x = subject, fill = SubEmoMemScore)) +
+  geom_bar(position = "stack", width = .8) +
+  facet_grid(~Emotion) +
+  theme(axis.text.x = element_blank()) +
+  xlab("Subjects") +
+  ylab("Trial Count") +
+  ggtitle("Subsequent Emotional Memory Scores", subtitle = "Among MICE fMRI Subjects") +
+  labs(caption = "NaN = Subsequent NRs\nRed Shades = Incorrect, Blue Shades = Correct") +
+  scale_fill_manual(values=c("#2b8cbe", "#fecc5c", "#fd8d3c", "#e31a1c", "#a6bddb")) + 
+  geom_hline(yintercept = 10, color = "black")
+```
+
+Note: the big change between the 'Misspecified' model and the new 'fixed' model is dealing with the NaN's in the figure above. Explained below.
+
+
+# The 'Misspecified' Model
+
+The model that I presented in Joint Lab meeting was **misspecified**. The previous model gave the relatively rarely occuring `subsequent NR` trial type a score of 0. This should NOT be the case; these trials should be "ignored" in the same way that neutral trials are ignored for the NegDM parametric regressor and negative trials for the NeuDM parametric regressor.
+
+The new 'fixed' model now ignores subsequent NRs when creating the Difference in Memory (DM) parametric modulators.
+
+...this leads to substantial differences in the parametric modulators. See how the design matrix changes for an example subject `sub-s011`:
+
+`sub-s011`'s behavior looks like this:
+
+```{r, fig.align='center', echo=FALSE}
+tidy.df %>%
+  mutate(
+    SubEmoMemScore = factor(SubEmoMemScore, levels = c("4", "NaN", "1", "2", "3"))
+  ) %>%
+  ggplot(aes(x = subject, fill = SubEmoMemScore)) +
+  geom_bar(position = "stack", width = .8) +
+  annotate("rect", xmin = which(levels(tidy.df$subject) == "sub-s011") - .5, xmax = which(levels(tidy.df$subject) == "sub-s011") + .5, ymin = 0, ymax = 96, alpha = .2, color = 'red') +
+  facet_grid(~Emotion) +
+  theme(axis.text.x = element_blank()) +
+  xlab("Subjects") +
+  ylab("Trial Count") +
+  ggtitle("Subsequent Emotional Memory Scores", subtitle = "Among MICE fMRI Subjects") +
+  labs(caption = "NaN = Subsequent NRs\nRed Shades = Incorrect, Blue Shades = Correct") +
+  scale_fill_manual(values=c("#2b8cbe", "#fecc5c", "#fd8d3c", "#e31a1c", "#a6bddb")) + 
+  geom_hline(yintercept = 10, color = "black")
+```
+
+As you can see, `sub-s011` has a good number of both subsequent Emotional NRs and subsequent Neutral NRs. The effects of the fixed model should effect subjects with lots of subsequent NRs.  
+
+`sub-s011`'s design matrix before and after:  
+
+```{r, echo=FALSE, fig.show='animate', fig.align='center'}
+# Misspecified
+miss_design_matrix <- as.matrix(read.csv('data/sub-s011_design_matrix-misspecified.csv'))
+row.names(miss_design_matrix) <- seq(1, nrow(miss_design_matrix), 1)
+colnames(miss_design_matrix) <- c("Emo-MBs", "Neu-MBs", #mini-blocks
+                                      "All-Trials","SubEmoMem","SubNeuMem", #trials
+                                      "x", "y", "z", #translation
+                                      "pitch", "roll", "yaw", #rotation
+                                      "run1-HPF1", "run1-HPF2", "run1-HPF3", #run1
+                                      "run2-HPF1", "run2-HPF2", "run2-HPF3", #run2
+                                      "run3-HPF1", "run3-HPF2", "run3-HPF3", #run3
+                                      "run4-HPF1", "run4-HPF2", "run4-HPF3", #run4
+                                      "run5-HPF1", "run5-HPF2", "run5-HPF3", #run5
+                                      "run6-HPF1", "run6-HPF2", "run6-HPF3", #run6
+                                      "run1-constant", "run2-constant", #run-constants
+                                      "run3-constant", "run4-constant", #run-constants
+                                      "run5-constant", "run6-constant", #run-constants
+                                      "constant" #experiment-wide-constant
+                                      )
+ 
+long.data <- melt(miss_design_matrix, varnames = c("Scan", "Regressor"))
+ 
+ggplot(long.data, aes(x = Regressor, y = Scan)) +
+  geom_raster(aes(fill=value)) +
+  annotate("rect", xmin = 34.5, xmax = 35.5, ymin = 0, ymax = 990,
+  alpha = .2, color = 'red') +
+  scale_x_discrete(position = "top") +
+  scale_fill_continuous(guide = FALSE) +
+  scale_y_continuous(trans = "reverse", breaks = seq(0,990,165)) +
+  theme(axis.text.x=element_text(size=8, angle=90, vjust=0.3, hjust = 0),
+        axis.text.y=element_text(size=9),
+        plot.title=element_text(size=11),
+        panel.grid=element_blank(),
+        panel.background=element_blank(),
+        axis.ticks.x = element_line()) +
+  labs(title = "Sub-s011's 'Misspecified' Design Matrix")
+ 
+ 
+# Fixed
+fixed_design_matrix <- as.matrix(read.csv('data/sub-s011_design_matrix-fixed.csv'))
+row.names(fixed_design_matrix) <- seq(1, nrow(fixed_design_matrix), 1)
+colnames(fixed_design_matrix) <- c("Emo-MBs", "Neu-MBs", #mini-blocks
+                                      "All-Trials","SubEmoMem","SubNeuMem", #trials
+                                      "x", "y", "z", #translation
+                                      "pitch", "roll", "yaw", #rotation
+                                      "run1-HPF1", "run1-HPF2", "run1-HPF3", #run1
+                                      "run2-HPF1", "run2-HPF2", "run2-HPF3", #run2
+                                      "run3-HPF1", "run3-HPF2", "run3-HPF3", #run3
+                                      "run4-HPF1", "run4-HPF2", "run4-HPF3", #run4
+                                      "run5-HPF1", "run5-HPF2", "run5-HPF3", #run5
+                                      "run6-HPF1", "run6-HPF2", "run6-HPF3", #run6
+                                      "run1-constant", "run2-constant", #run-constants
+                                      "run3-constant", "run4-constant", #run-constants
+                                      "run5-constant", #run-constants
+                                      "constant" #experiment-wide-constant
+                                      )
+
+long.data <- melt(fixed_design_matrix, varnames = c("Scan", "Regressor"))
+
+ggplot(long.data, aes(x = Regressor, y = Scan)) +
+  geom_raster(aes(fill=value)) +
+  scale_x_discrete(position = "top") +
+  scale_fill_continuous(guide = FALSE) +
+  scale_y_continuous(trans = "reverse", breaks = seq(0,990,165)) +
+  theme(axis.text.x=element_text(size=8, angle=90, vjust=0.3, hjust = 0),
+        axis.text.y=element_text(size=9),
+        plot.title=element_text(size=11),
+        panel.grid=element_blank(),
+        panel.background=element_blank(),
+        axis.ticks.x = element_line()) +
+  labs(title = "Sub-s011's 'Fixed' Design Matrix")
+
+```
+
+I choose this subject because they have a number of both Emotional and Neutral Subsequent NRs.
+
+I know what you are saying: those parametric modulators look almost identitical. I double checked my code and I am sure that this is correct. Looking at the orthongality plot in SPM, these regressors are all co-linear (cosine values > .9).
+
+How does this effect the results we looked at?
+
+# Results
+
+## Transient
+
+First, lets read it the data and clean it up
+
+```{r}
+read.csv('data/roi-results.csv') %>%
+  mutate(hemisphere = ifelse(grepl("[L]{1}", roi_name), "L", ifelse(grepl("[R]{1}", roi_name), "R", NA)),
+         hemisphere = ifelse(hemisphere == "L", "Left", ifelse(hemisphere == "R", "Right", NA)),
+         hemisphere = factor(hemisphere),
+         region     = roi_name,
+         region     = sub("^r", "", region), # remove the leading "r"
+         region     = sub("_[LR]{1}_mask$", "", region), # remove the trailing "_L/R_mask"
+         region     = factor(region, levels = c("AMY", "PRC", "HIPP_BODY", "HIPP_HEAD", "PHC_ANT"))
+         ) -> df
+```
+
+### MTL ROIs
+
+Below are the new results within our MTL Regions of Interest.
+
+```{r, warning=FALSE, fig.align='center'}
+df %>%
+  ggplot(aes(x = con_name, y = summary_value, fill = con_name)) +
+    geom_bar(stat = "summary",
+             fun.y = "mean") +
+    geom_errorbar(stat = "summary",
+                  fun.data = "mean_se",
+                  width = 0.2) +
+    facet_grid(hemisphere~region) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(y = "Mean Beta Value",
+         x = "Parameter",
+         title = "Transient DM Effects",
+         subtitle = "'Fixed' Model") +
+    scale_x_discrete(limits = c("NegDM", "NeuDM")) +
+    scale_fill_manual(guide=FALSE, values = c("#de2d26", "#3182bd"))
+```
+
+Run a `hemisphere` (right/left) x `Parameter` (NegDM/NeuDM) ANOVA on each region.
+
+```{r, warning = FALSE}
+regions <- levels(df$region)
+
+for(cregion in regions){
+  
+  df[df$region == cregion,] %>%
+    filter(grepl("DM", con_name)) -> c.region.df
+  
+  ezANOVA(data = c.region.df
+          , dv = summary_value
+          , wid = subject_id
+          , within = .(con_name, hemisphere)
+  ) -> results
+  
+#  if(any(results[[1]]$`p<.05` != '')){
+    print(paste("Region:", cregion))
+    print(results)
+#  }
+}
+
+```
+
+### Whole Brain
+
+The whole brain results are displayed below. The unthresholded spmT image for the contrast NegDM > NeuDM is overlayed on an MNI template:
+
+<script type="text/javascript">
+
+var params = [];
+
+params["images"] = ["./ROIs/icbm_avg_152_t1_tal_nlin_symmetric_VI.nii", "./ROIs/negdm_vs_neudm_spmT.nii"];
+
+params["worldSpace"] = true;
+params["showControls"] = false;
+params["allowScroll"] = false;
+
+</script>
+
+<div style="width:600px; height:600px;">
+  <div class="papaya" id="container0" data-params="params"></div>
+</div>
+
+## Sustained
+
+Below are the updated results for the sustained regressors:  
+
+### MTL ROIs
+
+Below are the new results within our MTL Regions of Interest.
+
+```{r, warning=FALSE, fig.align='center'}
+df %>%
+  ggplot(aes(x = con_name, y = summary_value, fill = con_name)) +
+    geom_bar(stat = "summary",
+             fun.y = "mean") +
+    geom_errorbar(stat = "summary",
+                  fun.data = "mean_se",
+                  width = 0.2) +
+    facet_grid(hemisphere~region) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(y = "Mean Beta Value",
+         x = "Parameter",
+         title = "Transient DM Effects",
+         subtitle = "'Fixed' Model") +
+    scale_x_discrete(limits = c("Emotional-Blocks", "Neutral-Blocks")) +
+    scale_fill_discrete(guide=FALSE)
+```
+
+Run a `hemisphere` (right/left) x `Parameter` (Emotional-Blocks/Neutral-Blocks) ANOVA on each region:
+
+```{r, warning = FALSE}
+regions <- levels(df$region)
+
+for(cregion in regions){
+  
+  df[df$region == cregion,] %>%
+    filter(grepl("Blocks", con_name)) -> c.region.df
+  
+  ezANOVA(data = c.region.df
+          , dv = summary_value
+          , wid = subject_id
+          , within = .(con_name, hemisphere)
+  ) -> results
+  
+#  if(any(results[[1]]$`p<.05` != '')){
+    print(paste("Region:", cregion))
+    print(results)
+#  }
+}
+
+```
+
+### Whole Brain
+
+The whole brain results are displayed below. The unthresholded spmT image for the contrast NegDM > NeuDM is overlayed on an MNI template:
+
+<script type="text/javascript">
+
+var paramsK = [];
+
+paramsK["images"] = ["./ROIs/icbm_avg_152_t1_tal_nlin_symmetric_VI.nii", "./ROIs/emo-blocks_vs_neu-blocks_spmT.nii"];
+
+paramsK["worldSpace"] = true;
+paramsK["showControls"] = false;
+paramsK["allowScroll"] = false;
+
+</script>
+
+<div style="width:600px; height:600px;">
+  <div class="papaya" id="container1" data-params="paramsK"></div>
+</div>
+
+# Conclusions
+
